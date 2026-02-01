@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-Omni-7B}"
-MODEL_PATH="${MODEL_PATH:-/runpod-volume/models/Qwen2.5-Omni-7B}"
+MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-Omni-3B}"
+MODEL_PATH="${MODEL_PATH:-/workspace/models/Qwen2.5-Omni-3B}"
 DTYPE="${DTYPE:-bfloat16}"
 PORT="${PORT:-8000}"
 HOST="${HOST:-0.0.0.0}"

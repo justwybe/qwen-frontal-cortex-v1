@@ -8,8 +8,8 @@ set -e
 #   export HF_TOKEN=hf_your_token
 #   bash scripts/download_model.sh
 
-MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-Omni-7B}"
-MODEL_PATH="${MODEL_PATH:-/runpod-volume/models/Qwen2.5-Omni-7B}"
+MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-Omni-3B}"
+MODEL_PATH="${MODEL_PATH:-/workspace/models/Qwen2.5-Omni-3B}"
 
 echo "Downloading ${MODEL_NAME} to ${MODEL_PATH}..."
 

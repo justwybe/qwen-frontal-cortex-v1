@@ -12,11 +12,10 @@ echo "============================================"
 echo "  RunPod Setup - Qwen 2.5 Omni"
 echo "============================================"
 
-# Ensure network volume is mounted
-VOLUME="/runpod-volume"
+# Check for network volume
+VOLUME="/workspace"
 if [ ! -d "${VOLUME}" ]; then
-    echo "ERROR: Network volume not found at ${VOLUME}."
-    echo "Make sure you have a network volume attached to your pod."
+    echo "ERROR: No volume found at ${VOLUME}."
     exit 1
 fi
 
@@ -36,12 +35,12 @@ pip install setuptools_scm torchdiffeq resampy x_transformers accelerate
 pip install "qwen-omni-utils[decord]"
 
 # Install vLLM from Qwen's custom fork
-if [ ! -d "${VOLUME}/vllm" ]; then
-    git clone -b qwen2_omni_public https://github.com/fyabc/vllm.git "${VOLUME}/vllm"
-    cd "${VOLUME}/vllm"
+if [ ! -d "/workspace/vllm" ]; then
+    git clone -b qwen2_omni_public https://github.com/fyabc/vllm.git "/workspace/vllm"
+    cd "/workspace/vllm"
     git checkout 729feed3ec2beefe63fda30a345ef363d08062f8
 else
-    cd "${VOLUME}/vllm"
+    cd "/workspace/vllm"
 fi
 
 pip install -r requirements/cuda.txt
