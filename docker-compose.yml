@@ -1,0 +1,28 @@
+services:
+  qwen-omni:
+    build: .
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_TOKEN=${HF_TOKEN}
+      - MODEL_NAME=${MODEL_NAME:-Qwen/Qwen2.5-Omni-7B}
+      - MODEL_PATH=${MODEL_PATH:-/models/Qwen2.5-Omni-7B}
+      - DTYPE=${DTYPE:-bfloat16}
+      - PORT=${PORT:-8000}
+      - HOST=${HOST:-0.0.0.0}
+      - GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.90}
+      - MAX_MODEL_LEN=${MAX_MODEL_LEN:-4096}
+    ports:
+      - "${PORT:-8000}:8000"
+    volumes:
+      - model-cache:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  model-cache:
