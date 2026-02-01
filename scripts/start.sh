@@ -9,8 +9,12 @@ HOST="${HOST:-0.0.0.0}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-4096}"
 
+# Required for vLLM-Omni fork compatibility
+export VLLM_USE_V1=0
+
 echo "============================================"
 echo "  Qwen 2.5 Omni - Frontal Cortex v1"
+echo "  (vLLM-Omni with Thinker+Talker)"
 echo "============================================"
 echo "Model: ${MODEL_NAME}"
 echo "Path:  ${MODEL_PATH}"
@@ -18,6 +22,8 @@ echo "Dtype: ${DTYPE}"
 echo "Port:  ${PORT}"
 echo "GPU Memory Utilization: ${GPU_MEMORY_UTILIZATION}"
 echo "Max Model Length: ${MAX_MODEL_LEN}"
+echo "VLLM_USE_V1: ${VLLM_USE_V1}"
+echo "Omni mode: enabled (text + audio output)"
 echo "============================================"
 
 # Download model if not already present
@@ -40,12 +46,15 @@ else
     echo "Model found at ${MODEL_PATH}. Skipping download."
 fi
 
-echo "Starting vLLM server..."
+echo "Starting vLLM-Omni server..."
 
-exec vllm serve "${MODEL_PATH}" \
+# Run in background (no exec) so start_webui.sh can run alongside
+vllm serve "${MODEL_PATH}" \
     --port "${PORT}" \
     --host "${HOST}" \
     --dtype "${DTYPE}" \
     --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
     --max-model-len "${MAX_MODEL_LEN}" \
-    --trust-remote-code
+    --trust-remote-code \
+    --omni \
+    --limit-mm-per-prompt image=1,video=1,audio=1
