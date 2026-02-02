@@ -49,8 +49,8 @@ apt-get update && apt-get install -y ffmpeg libsndfile1
 # Upgrade pip
 pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Upgrade PyTorch (>=2.6 required by transformers for CVE-2025-32434 torch.load fix)
-pip install --no-cache-dir "torch>=2.6.0"
+# Upgrade PyTorch stack (>=2.6 required by transformers for CVE-2025-32434 torch.load fix)
+pip install --no-cache-dir "torch>=2.6.0" torchvision torchaudio
 
 # Core inference stack (pin transformers <5 — 5.0 has breaking changes for Qwen2.5-Omni)
 pip install --no-cache-dir "transformers>=4.51.0,<5.0.0" accelerate
