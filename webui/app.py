@@ -191,7 +191,6 @@ def build_ui():
     # ---- Gradio Layout ----
     with gr.Blocks(
         title="Qwen 2.5 Omni — Multimodal Conversation",
-        theme=gr.themes.Soft(),
     ) as demo:
         gr.Markdown(
             "# Qwen 2.5 Omni — Real-Time Multimodal Conversation\n"
@@ -204,7 +203,6 @@ def build_ui():
                 chatbot = gr.Chatbot(
                     label="Conversation",
                     height=500,
-                    type="messages",
                 )
                 with gr.Row():
                     text_input = gr.Textbox(
