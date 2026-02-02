@@ -2,104 +2,67 @@
 Gradio Web UI for Qwen 2.5 Omni — real-time multimodal conversation.
 
 Supports:
-  - Webcam image capture (sent as base64 image)
-  - Microphone audio input (sent as base64 audio)
+  - Webcam image capture
+  - Microphone audio input
   - Text input
-  - Streaming text output
-  - Audio speech output (played in browser)
+  - Text + audio speech output (played in browser)
 
-Requires vLLM-Omni server running with --omni flag on port 8000.
+Uses direct transformers inference (no vLLM server).
 """
 
 import argparse
-import base64
 import io
-import json
-import struct
 import tempfile
 from pathlib import Path
 
 import gradio as gr
 import numpy as np
 import soundfile as sf
-from openai import OpenAI
+import torch
+from transformers import Qwen2_5OmniForConditionalGeneration, Qwen2_5OmniProcessor
+from qwen_omni_utils import process_mm_info
+
+# Global model and processor (loaded once at startup)
+model = None
+processor = None
+
+AUDIO_SAMPLE_RATE = 24000
 
 
-def encode_image_to_base64(image_path: str) -> str:
-    """Read an image file and return a data-URI string."""
-    with open(image_path, "rb") as f:
-        data = base64.b64encode(f.read()).decode()
-    suffix = Path(image_path).suffix.lower().lstrip(".")
-    mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
-            "gif": "image/gif", "webp": "image/webp"}.get(suffix, "image/png")
-    return f"data:{mime};base64,{data}"
+def load_model(model_path: str):
+    """Load the Qwen2.5-Omni model and processor."""
+    global model, processor
+
+    print(f"Loading model from {model_path}...")
+    model = Qwen2_5OmniForConditionalGeneration.from_pretrained(
+        model_path,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+        attn_implementation="flash_attention_2",
+    )
+    model.eval()
+
+    processor = Qwen2_5OmniProcessor.from_pretrained(model_path)
+    print("Model loaded successfully.")
 
 
-def encode_audio_to_base64(audio_path: str) -> str:
-    """Read an audio file and return a data-URI string."""
-    data, sr = sf.read(audio_path)
-    buf = io.BytesIO()
-    sf.write(buf, data, sr, format="WAV")
-    b64 = base64.b64encode(buf.getvalue()).decode()
-    return f"data:audio/wav;base64,{b64}"
-
-
-def numpy_audio_to_base64(sample_rate: int, audio_array: np.ndarray) -> str:
-    """Convert Gradio's (sample_rate, numpy_array) audio to base64 data-URI."""
+def numpy_audio_to_wav_path(sample_rate: int, audio_array: np.ndarray) -> str:
+    """Save Gradio's (sample_rate, numpy_array) audio to a temporary WAV file and return the path."""
     audio_array = audio_array.astype(np.float32)
     if audio_array.ndim > 1:
         audio_array = audio_array.mean(axis=1)
-    # Normalize to [-1, 1]
     peak = np.max(np.abs(audio_array))
     if peak > 0:
         audio_array = audio_array / peak
-    buf = io.BytesIO()
-    sf.write(buf, audio_array, sample_rate, format="WAV")
-    b64 = base64.b64encode(buf.getvalue()).decode()
-    return f"data:audio/wav;base64,{b64}"
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    sf.write(tmp.name, audio_array, sample_rate)
+    return tmp.name
 
 
-def decode_audio_response(audio_b64: str) -> tuple[int, np.ndarray] | None:
-    """Decode a base64-encoded WAV from the model response into (sample_rate, numpy_array)."""
-    try:
-        if "," in audio_b64:
-            audio_b64 = audio_b64.split(",", 1)[1]
-        raw = base64.b64decode(audio_b64)
-        buf = io.BytesIO(raw)
-        data, sr = sf.read(buf)
-        return sr, (data * 32767).astype(np.int16)
-    except Exception:
-        return None
-
-
-def pcm_to_wav_bytes(pcm_data: bytes, sample_rate: int = 24000,
-                     num_channels: int = 1, sample_width: int = 2) -> bytes:
-    """Wrap raw PCM bytes in a WAV header."""
-    data_size = len(pcm_data)
-    header = struct.pack(
-        '<4sI4s4sIHHIIHH4sI',
-        b'RIFF', 36 + data_size, b'WAVE',
-        b'fmt ', 16, 1, num_channels,
-        sample_rate, sample_rate * num_channels * sample_width,
-        num_channels * sample_width, sample_width * 8,
-        b'data', data_size,
-    )
-    return header + pcm_data
-
-
-def build_ui(vllm_base_url: str):
+def build_ui():
     """Construct and return the Gradio Blocks app."""
 
-    client = OpenAI(base_url=f"{vllm_base_url}/v1", api_key="not-needed")
-
-    # Detect the served model name once at startup
-    try:
-        models = client.models.list()
-        model_id = models.data[0].id if models.data else "Qwen2.5-Omni-3B"
-    except Exception:
-        model_id = "Qwen2.5-Omni-3B"
-
-    def chat(
+    def generate_response(
         message: str,
         image: str | None,
         audio: tuple[int, np.ndarray] | None,
@@ -107,157 +70,30 @@ def build_ui(vllm_base_url: str):
         system_prompt: str,
         temperature: float,
         max_tokens: int,
+        voice: str,
     ):
-        """Send a multimodal message and stream the response."""
+        """Run inference and return text + audio."""
 
-        # Build the user content list
-        content: list[dict] = []
-
-        # Attach image if provided (webcam snapshot)
-        if image is not None:
-            img_uri = encode_image_to_base64(image)
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": img_uri},
-            })
-
-        # Attach audio if provided (microphone recording)
-        if audio is not None:
-            sr, arr = audio
-            audio_uri = numpy_audio_to_base64(sr, arr)
-            content.append({
-                "type": "input_audio",
-                "input_audio": {"data": audio_uri, "format": "wav"},
-            })
-
-        # Attach text (always present, even if empty — the model needs at least one text part)
-        text = message.strip() if message else ""
-        if not text and not content:
-            yield history, None
-            return
-        if text:
-            content.append({"type": "text", "text": text})
-        elif not content:
-            yield history, None
-            return
-
-        # Build messages array
-        messages = []
-        if system_prompt.strip():
-            messages.append({"role": "system", "content": system_prompt.strip()})
-
-        # Add conversation history
-        for entry in history:
-            messages.append({"role": entry["role"], "content": entry["content"]})
-
-        messages.append({"role": "user", "content": content})
-
-        # Append user message to history for display
-        display_parts = []
-        if text:
-            display_parts.append(text)
-        if image:
-            display_parts.append("[image attached]")
-        if audio:
-            display_parts.append("[audio attached]")
-        user_display = " ".join(display_parts)
-
-        history = history + [{"role": "user", "content": user_display}]
-
-        # Call vLLM-Omni with streaming, requesting both text and audio
-        try:
-            stream = client.chat.completions.create(
-                model=model_id,
-                messages=messages,
-                modalities=["text", "audio"],
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stream=True,
-            )
-
-            assistant_text = ""
-            audio_data_b64 = ""
-
-            for chunk in stream:
-                delta = chunk.choices[0].delta if chunk.choices else None
-                if delta is None:
-                    continue
-
-                # Text content
-                if delta.content:
-                    assistant_text += delta.content
-                    updated_history = history + [
-                        {"role": "assistant", "content": assistant_text}
-                    ]
-                    yield updated_history, None
-
-                # Audio content (may arrive in the delta or as audio field)
-                if hasattr(delta, "audio") and delta.audio:
-                    audio_chunk = delta.audio
-                    if isinstance(audio_chunk, dict):
-                        audio_data_b64 += audio_chunk.get("data", "")
-                    elif isinstance(audio_chunk, str):
-                        audio_data_b64 += audio_chunk
-
-            # Final update with complete text
-            if assistant_text:
-                history = history + [{"role": "assistant", "content": assistant_text}]
-            else:
-                history = history + [{"role": "assistant", "content": "(audio-only response)"}]
-
-            # Decode audio if present
-            audio_output = None
-            if audio_data_b64:
-                audio_output = decode_audio_response(audio_data_b64)
-
-            yield history, audio_output
-
-        except Exception as e:
-            error_msg = f"Error: {e}"
-            history = history + [{"role": "assistant", "content": error_msg}]
-            yield history, None
-
-    def chat_non_stream(
-        message: str,
-        image: str | None,
-        audio: tuple[int, np.ndarray] | None,
-        history: list[dict],
-        system_prompt: str,
-        temperature: float,
-        max_tokens: int,
-    ):
-        """Non-streaming fallback — collects the full response then returns."""
-
-        content: list[dict] = []
+        # Build user content parts for the Qwen chat template
+        user_content = []
 
         if image is not None:
-            img_uri = encode_image_to_base64(image)
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": img_uri},
-            })
+            user_content.append({"type": "image", "image": image})
 
         if audio is not None:
             sr, arr = audio
-            audio_uri = numpy_audio_to_base64(sr, arr)
-            content.append({
-                "type": "input_audio",
-                "input_audio": {"data": audio_uri, "format": "wav"},
-            })
+            wav_path = numpy_audio_to_wav_path(sr, arr)
+            user_content.append({"type": "audio", "audio": wav_path})
 
         text = message.strip() if message else ""
+        if not text and not user_content:
+            return history, None
         if text:
-            content.append({"type": "text", "text": text})
-        elif not content:
+            user_content.append({"type": "text", "text": text})
+        elif not user_content:
             return history, None
 
-        messages = []
-        if system_prompt.strip():
-            messages.append({"role": "system", "content": system_prompt.strip()})
-        for entry in history:
-            messages.append({"role": entry["role"], "content": entry["content"]})
-        messages.append({"role": "user", "content": content})
-
+        # Build display text for chat history
         display_parts = []
         if text:
             display_parts.append(text)
@@ -265,35 +101,91 @@ def build_ui(vllm_base_url: str):
             display_parts.append("[image attached]")
         if audio:
             display_parts.append("[audio attached]")
+
         history = history + [{"role": "user", "content": " ".join(display_parts)}]
 
+        # Build messages for the model
+        messages = []
+        if system_prompt.strip():
+            messages.append({"role": "system", "content": [{"type": "text", "text": system_prompt.strip()}]})
+
+        # Rebuild conversation from history (text-only for prior turns)
+        for entry in history[:-1]:  # exclude the latest user message we just added
+            messages.append({"role": entry["role"], "content": [{"type": "text", "text": entry["content"]}]})
+
+        # Add current user message with multimodal content
+        messages.append({"role": "user", "content": user_content})
+
         try:
-            response = client.chat.completions.create(
-                model=model_id,
-                messages=messages,
-                modalities=["text", "audio"],
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stream=False,
+            # Process with Qwen's chat template
+            text_prompt = processor.apply_chat_template(
+                messages, add_generation_prompt=True, tokenize=False
             )
 
-            choice = response.choices[0]
-            assistant_text = choice.message.content or ""
-            history = history + [
-                {"role": "assistant", "content": assistant_text or "(audio-only response)"}
-            ]
+            # Extract multimodal inputs
+            audios, images, videos = process_mm_info(messages, use_audio_in_video=True)
 
+            inputs = processor(
+                text=text_prompt,
+                audio=audios,
+                images=images,
+                videos=videos,
+                return_tensors="pt",
+                padding=True,
+                use_audio_in_video=True,
+            )
+            inputs = inputs.to(model.device).to(model.dtype)
+
+            # Generate with audio output
+            gen_kwargs = {
+                "use_audio_in_video": True,
+                "return_audio": True,
+                "speaker": voice,
+                "max_new_tokens": max_tokens,
+            }
+            if temperature > 0:
+                gen_kwargs["temperature"] = temperature
+                gen_kwargs["do_sample"] = True
+            else:
+                gen_kwargs["do_sample"] = False
+
+            with torch.no_grad():
+                text_ids, audio_waveform = model.generate(**inputs, **gen_kwargs)
+
+            # Decode text
+            assistant_text = processor.batch_decode(
+                text_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
+            )
+            response_text = assistant_text[0] if assistant_text else ""
+
+            history = history + [{"role": "assistant", "content": response_text or "(audio-only response)"}]
+
+            # Convert audio waveform to Gradio format (sample_rate, numpy_array)
             audio_output = None
-            if hasattr(choice.message, "audio") and choice.message.audio:
-                aud = choice.message.audio
-                b64 = aud.get("data", "") if isinstance(aud, dict) else str(aud)
-                if b64:
-                    audio_output = decode_audio_response(b64)
+            if audio_waveform is not None:
+                if isinstance(audio_waveform, torch.Tensor):
+                    audio_np = audio_waveform.cpu().float().numpy()
+                else:
+                    audio_np = np.array(audio_waveform, dtype=np.float32)
+
+                # Flatten if needed
+                if audio_np.ndim > 1:
+                    audio_np = audio_np.squeeze()
+
+                # Normalize to int16 range for playback
+                peak = np.max(np.abs(audio_np))
+                if peak > 0:
+                    audio_np = audio_np / peak
+                audio_int16 = (audio_np * 32767).astype(np.int16)
+                audio_output = (AUDIO_SAMPLE_RATE, audio_int16)
 
             return history, audio_output
 
         except Exception as e:
-            history = history + [{"role": "assistant", "content": f"Error: {e}"}]
+            error_msg = f"Error: {e}"
+            import traceback
+            traceback.print_exc()
+            history = history + [{"role": "assistant", "content": error_msg}]
             return history, None
 
     # ---- Gradio Layout ----
@@ -347,6 +239,11 @@ def build_ui(vllm_base_url: str):
                     value="You are a helpful assistant. Respond naturally in conversation.",
                     lines=4,
                 )
+                voice_select = gr.Dropdown(
+                    label="Voice",
+                    choices=["Chelsie", "Ethan"],
+                    value="Chelsie",
+                )
                 temperature = gr.Slider(
                     label="Temperature",
                     minimum=0.0,
@@ -361,27 +258,17 @@ def build_ui(vllm_base_url: str):
                     value=512,
                     step=64,
                 )
-                use_streaming = gr.Checkbox(
-                    label="Stream responses",
-                    value=True,
-                )
                 clear_btn = gr.Button("Clear Conversation")
-                model_info = gr.Markdown(f"**Model:** `{model_id}`\n\n**Server:** `{vllm_base_url}`")
+                gr.Markdown("**Inference:** Direct transformers (in-process)")
 
-        # State for conversation history (kept as list of dicts)
+        # State for conversation history
         history_state = gr.State([])
 
-        def on_send(message, image, audio, history, system_prompt, temperature, max_tokens, streaming):
-            if streaming:
-                for updated_history, audio_out in chat(
-                    message, image, audio, history, system_prompt, temperature, max_tokens
-                ):
-                    yield updated_history, updated_history, audio_out, "", None, None
-            else:
-                updated_history, audio_out = chat_non_stream(
-                    message, image, audio, history, system_prompt, temperature, max_tokens
-                )
-                yield updated_history, updated_history, audio_out, "", None, None
+        def on_send(message, image, audio, history, system_prompt, temperature, max_tokens, voice):
+            updated_history, audio_out = generate_response(
+                message, image, audio, history, system_prompt, temperature, max_tokens, voice
+            )
+            return updated_history, updated_history, audio_out, "", None, None
 
         def on_clear():
             return [], [], None
@@ -390,7 +277,7 @@ def build_ui(vllm_base_url: str):
             fn=on_send,
             inputs=[
                 text_input, image_input, audio_input, history_state,
-                system_prompt, temperature, max_tokens, use_streaming,
+                system_prompt, temperature, max_tokens, voice_select,
             ],
             outputs=[
                 chatbot, history_state, audio_output,
@@ -402,7 +289,7 @@ def build_ui(vllm_base_url: str):
             fn=on_send,
             inputs=[
                 text_input, image_input, audio_input, history_state,
-                system_prompt, temperature, max_tokens, use_streaming,
+                system_prompt, temperature, max_tokens, voice_select,
             ],
             outputs=[
                 chatbot, history_state, audio_output,
@@ -420,14 +307,15 @@ def build_ui(vllm_base_url: str):
 
 def main():
     parser = argparse.ArgumentParser(description="Qwen 2.5 Omni Web UI")
+    parser.add_argument("--model-path", type=str, default="/workspace/models/Qwen2.5-Omni-3B",
+                        help="Path to the model directory")
     parser.add_argument("--port", type=int, default=7860, help="Gradio server port")
-    parser.add_argument("--vllm-host", type=str, default="localhost", help="vLLM server host")
-    parser.add_argument("--vllm-port", type=int, default=8000, help="vLLM server port")
     parser.add_argument("--share", action="store_true", help="Create a public Gradio link")
     args = parser.parse_args()
 
-    vllm_base_url = f"http://{args.vllm_host}:{args.vllm_port}"
-    demo = build_ui(vllm_base_url)
+    load_model(args.model_path)
+
+    demo = build_ui()
     demo.launch(
         server_name="0.0.0.0",
         server_port=args.port,

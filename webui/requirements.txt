@@ -1,4 +1,6 @@
+transformers>=4.45.0
+accelerate
+qwen-omni-utils[decord]
 gradio>=4.44.0
-openai>=1.12.0
 soundfile
 numpy

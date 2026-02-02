@@ -23,25 +23,18 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 # Install PyTorch with CUDA 12.1
 RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
-# Install vLLM-Omni build dependencies
-RUN pip install --no-cache-dir setuptools_scm torchdiffeq resampy x_transformers accelerate
+# Core inference stack
+RUN pip install --no-cache-dir transformers accelerate
 RUN pip install --no-cache-dir "qwen-omni-utils[decord]"
 
-# Build vLLM from Qwen's custom fork (full Omni support including --omni flag for audio output)
-RUN git clone -b qwen2_omni_public https://github.com/fyabc/vllm.git /opt/vllm && \
-    cd /opt/vllm && \
-    git checkout 729feed3ec2beefe63fda30a345ef363d08062f8 && \
-    pip install --no-cache-dir -r requirements/cuda.txt && \
-    pip install --no-cache-dir .
+# Flash Attention (optional, speeds up inference)
+RUN pip install --no-cache-dir flash-attn --no-build-isolation || true
 
-# Install latest transformers from source (needed for Qwen2.5-Omni)
-RUN pip install --no-cache-dir git+https://github.com/huggingface/transformers
+# Gradio web UI + audio handling
+RUN pip install --no-cache-dir gradio soundfile numpy
 
-# Install huggingface-cli for model downloads
-RUN pip install --no-cache-dir huggingface_hub[cli]
-
-# Install Gradio web UI dependencies
-RUN pip install --no-cache-dir gradio openai soundfile numpy
+# Model download CLI
+RUN pip install --no-cache-dir "huggingface_hub[cli]"
 
 WORKDIR /app
 COPY scripts/ /app/scripts/
@@ -49,10 +42,6 @@ COPY config/ /app/config/
 COPY webui/ /app/webui/
 RUN chmod +x /app/scripts/*.sh
 
-# vLLM-Omni fork compatibility
-ENV VLLM_USE_V1=0
-
-EXPOSE 8000
 EXPOSE 7860
 
 ENTRYPOINT ["/app/scripts/start.sh"]

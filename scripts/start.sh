@@ -3,27 +3,15 @@ set -e
 
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-Omni-3B}"
 MODEL_PATH="${MODEL_PATH:-/workspace/models/Qwen2.5-Omni-3B}"
-DTYPE="${DTYPE:-bfloat16}"
-PORT="${PORT:-8000}"
-HOST="${HOST:-0.0.0.0}"
-GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
-MAX_MODEL_LEN="${MAX_MODEL_LEN:-4096}"
-
-# Required for vLLM-Omni fork compatibility
-export VLLM_USE_V1=0
+WEBUI_PORT="${WEBUI_PORT:-7860}"
 
 echo "============================================"
 echo "  Qwen 2.5 Omni - Frontal Cortex v1"
-echo "  (vLLM-Omni with Thinker+Talker)"
+echo "  (Direct transformers inference)"
 echo "============================================"
 echo "Model: ${MODEL_NAME}"
 echo "Path:  ${MODEL_PATH}"
-echo "Dtype: ${DTYPE}"
-echo "Port:  ${PORT}"
-echo "GPU Memory Utilization: ${GPU_MEMORY_UTILIZATION}"
-echo "Max Model Length: ${MAX_MODEL_LEN}"
-echo "VLLM_USE_V1: ${VLLM_USE_V1}"
-echo "Omni mode: enabled (text + audio output)"
+echo "Port:  ${WEBUI_PORT}"
 echo "============================================"
 
 # Download model if not already present
@@ -46,15 +34,11 @@ else
     echo "Model found at ${MODEL_PATH}. Skipping download."
 fi
 
-echo "Starting vLLM-Omni server..."
+# Resolve the webui directory relative to this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WEBUI_DIR="$(dirname "${SCRIPT_DIR}")/webui"
 
-# Run in background (no exec) so start_webui.sh can run alongside
-vllm serve "${MODEL_PATH}" \
-    --port "${PORT}" \
-    --host "${HOST}" \
-    --dtype "${DTYPE}" \
-    --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
-    --max-model-len "${MAX_MODEL_LEN}" \
-    --trust-remote-code \
-    --omni \
-    --limit-mm-per-prompt image=1,video=1,audio=1
+echo "Starting Gradio app..."
+exec python "${WEBUI_DIR}/app.py" \
+    --model-path "${MODEL_PATH}" \
+    --port "${WEBUI_PORT}"
