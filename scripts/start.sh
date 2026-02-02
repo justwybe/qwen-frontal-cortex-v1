@@ -19,15 +19,21 @@ if [ ! -d "${MODEL_PATH}" ] || [ -z "$(ls -A ${MODEL_PATH} 2>/dev/null)" ]; then
     echo "Model not found at ${MODEL_PATH}. Downloading..."
     mkdir -p "${MODEL_PATH}"
 
-    if [ -z "${HF_TOKEN}" ]; then
-        echo "WARNING: HF_TOKEN not set. Download may fail for gated models."
-    else
-        python -m huggingface_hub.cli login --token "${HF_TOKEN}"
-    fi
+    python -c "
+from huggingface_hub import snapshot_download, login
+import os
 
-    python -m huggingface_hub.cli download "${MODEL_NAME}" \
-        --local-dir "${MODEL_PATH}" \
-        --local-dir-use-symlinks False
+token = os.environ.get('HF_TOKEN')
+if token:
+    login(token=token)
+else:
+    print('WARNING: HF_TOKEN not set. Download may fail for gated models.')
+
+snapshot_download(
+    '${MODEL_NAME}',
+    local_dir='${MODEL_PATH}',
+)
+"
 
     echo "Download complete."
 else

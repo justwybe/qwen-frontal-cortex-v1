@@ -13,15 +13,21 @@ MODEL_PATH="${MODEL_PATH:-/workspace/models/Qwen2.5-Omni-3B}"
 
 echo "Downloading ${MODEL_NAME} to ${MODEL_PATH}..."
 
-if [ -n "${HF_TOKEN}" ]; then
-    python -m huggingface_hub.cli login --token "${HF_TOKEN}"
-fi
-
 mkdir -p "${MODEL_PATH}"
 
-python -m huggingface_hub.cli download "${MODEL_NAME}" \
-    --local-dir "${MODEL_PATH}" \
-    --local-dir-use-symlinks False
+python -c "
+from huggingface_hub import snapshot_download, login
+import os
+
+token = os.environ.get('HF_TOKEN')
+if token:
+    login(token=token)
+
+snapshot_download(
+    '${MODEL_NAME}',
+    local_dir='${MODEL_PATH}',
+)
+"
 
 echo "Done. Model saved to ${MODEL_PATH}"
 echo "Total size:"
