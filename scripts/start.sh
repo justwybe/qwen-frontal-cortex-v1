@@ -22,10 +22,10 @@ if [ ! -d "${MODEL_PATH}" ] || [ -z "$(ls -A ${MODEL_PATH} 2>/dev/null)" ]; then
     if [ -z "${HF_TOKEN}" ]; then
         echo "WARNING: HF_TOKEN not set. Download may fail for gated models."
     else
-        huggingface-cli login --token "${HF_TOKEN}"
+        python -m huggingface_hub.cli login --token "${HF_TOKEN}"
     fi
 
-    huggingface-cli download "${MODEL_NAME}" \
+    python -m huggingface_hub.cli download "${MODEL_NAME}" \
         --local-dir "${MODEL_PATH}" \
         --local-dir-use-symlinks False
 

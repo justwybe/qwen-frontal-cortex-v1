@@ -13,15 +13,13 @@ MODEL_PATH="${MODEL_PATH:-/workspace/models/Qwen2.5-Omni-3B}"
 
 echo "Downloading ${MODEL_NAME} to ${MODEL_PATH}..."
 
-pip install -q huggingface_hub[cli]
-
 if [ -n "${HF_TOKEN}" ]; then
-    huggingface-cli login --token "${HF_TOKEN}"
+    python -m huggingface_hub.cli login --token "${HF_TOKEN}"
 fi
 
 mkdir -p "${MODEL_PATH}"
 
-huggingface-cli download "${MODEL_NAME}" \
+python -m huggingface_hub.cli download "${MODEL_NAME}" \
     --local-dir "${MODEL_PATH}" \
     --local-dir-use-symlinks False
 

@@ -66,8 +66,7 @@ else
         || echo "WARNING: flash-attn install failed (optional, continuing without it)"
 fi
 
-# Model download CLI
-pip install --no-cache-dir "huggingface_hub[cli]"
+# huggingface_hub CLI is included in the base package (no [cli] extra needed)
 
 echo ""
 echo "============================================"
