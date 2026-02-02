@@ -49,8 +49,8 @@ apt-get update && apt-get install -y ffmpeg libsndfile1
 # Upgrade pip
 pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Core inference stack
-pip install --no-cache-dir transformers accelerate
+# Core inference stack (pin transformers <5 — 5.0 has breaking changes for Qwen2.5-Omni)
+pip install --no-cache-dir "transformers>=4.51.0,<5.0.0" accelerate
 
 # Qwen Omni multimodal utilities
 pip install --no-cache-dir "qwen-omni-utils[decord]"
