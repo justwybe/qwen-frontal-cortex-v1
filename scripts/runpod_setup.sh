@@ -16,8 +16,11 @@ echo "  RunPod Setup - Qwen 2.5 Omni 3B"
 echo "  (Direct transformers inference)"
 echo "============================================"
 
-# Remove vLLM if present — prevents pip from rebuilding it (OOM crash)
+# Remove vLLM entirely — the source tree at /workspace/vllm causes pip to
+# rebuild CUDA kernels, exhausting RAM and disk. Nuke it all.
 pip uninstall vllm -y 2>/dev/null || true
+rm -rf /workspace/vllm
+pip cache purge 2>/dev/null || true
 
 # Limit parallel compilation jobs as a safety net
 export MAX_JOBS=2
