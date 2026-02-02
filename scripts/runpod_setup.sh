@@ -16,11 +16,20 @@ echo "  RunPod Setup - Qwen 2.5 Omni 3B"
 echo "  (Direct transformers inference)"
 echo "============================================"
 
-# Remove vLLM entirely — the source tree at /workspace/vllm causes pip to
-# rebuild CUDA kernels, exhausting RAM and disk. Nuke it all.
+# ── Aggressively remove vLLM ──────────────────────────────────────────
+# RunPod images often ship vLLM from source. If pip's resolver sees it,
+# it tries to rebuild CUDA kernels → OOM / disk full. Remove every trace.
+echo "Removing vLLM (if present)..."
 pip uninstall vllm -y 2>/dev/null || true
-rm -rf /workspace/vllm
+# Remove source trees wherever they may be
+rm -rf /workspace/vllm /root/vllm /opt/vllm
+# Remove any leftover metadata from site-packages so pip forgets vLLM
+find / -type d -name "vllm*.dist-info" -exec rm -rf {} + 2>/dev/null || true
+find / -type d -name "vllm*.egg-info" -exec rm -rf {} + 2>/dev/null || true
+find / -type f -name "vllm.egg-link" -delete 2>/dev/null || true
+# Purge pip cache
 pip cache purge 2>/dev/null || true
+echo "vLLM cleanup done."
 
 # Limit parallel compilation jobs as a safety net
 export MAX_JOBS=2
