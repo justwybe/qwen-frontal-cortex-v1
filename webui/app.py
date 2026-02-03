@@ -39,6 +39,7 @@ def load_model(model_path: str):
         torch_dtype=torch.bfloat16,
         device_map="auto",
         attn_implementation="sdpa",
+        max_memory={0: "22GiB", 1: "22GiB"},  # Use both GPUs
     )
     model.eval()
 
