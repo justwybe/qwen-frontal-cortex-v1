@@ -13,6 +13,7 @@ Uses direct transformers inference (no vLLM server).
 import argparse
 import io
 import tempfile
+import time
 from pathlib import Path
 
 import gradio as gr
@@ -33,12 +34,21 @@ def load_model(model_path: str):
     """Load the Qwen2.5-Omni model and processor."""
     global model, processor
 
+    # Check if flash attention is available
+    try:
+        import flash_attn
+        attn_impl = "flash_attention_2"
+        print(f"Using Flash Attention 2 (v{flash_attn.__version__})")
+    except ImportError:
+        attn_impl = "sdpa"
+        print("WARNING: Flash Attention not installed, using SDPA (slower)")
+
     print(f"Loading model from {model_path}...")
     model = Qwen2_5OmniForConditionalGeneration.from_pretrained(
         model_path,
         torch_dtype=torch.bfloat16,
         device_map="auto",
-        attn_implementation="sdpa",
+        attn_implementation=attn_impl,
         max_memory={0: "22GiB", 1: "22GiB"},  # Use both GPUs
     )
     model.eval()
@@ -150,8 +160,10 @@ def build_ui():
             else:
                 gen_kwargs["do_sample"] = False
 
+            t0 = time.time()
             with torch.no_grad():
                 text_ids, audio_waveform = model.generate(**inputs, **gen_kwargs)
+            print(f"Generation took {time.time() - t0:.2f}s")
 
             # Decode text
             assistant_text = processor.batch_decode(

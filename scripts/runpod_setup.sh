@@ -61,12 +61,21 @@ pip install --no-cache-dir "qwen-omni-utils[decord]"
 # Gradio web UI + audio handling
 pip install --no-cache-dir gradio soundfile numpy
 
-# Flash Attention (optional, speeds up inference — skip if already installed or fails)
+# Flash Attention (CRITICAL for GPU utilization — required for performance)
 if python -c "import flash_attn" 2>/dev/null; then
-    echo "flash-attn already installed, skipping"
+    echo "flash-attn already installed"
 else
+    echo "Installing flash-attn (required for GPU utilization)..."
     MAX_JOBS=2 pip install --no-cache-dir flash-attn --no-build-isolation \
-        || echo "WARNING: flash-attn install failed (optional, continuing without it)"
+        || echo "ERROR: flash-attn install failed — inference will be slow (CPU-bound SDPA)"
+fi
+
+# Verify flash-attn installation
+if python -c "import flash_attn; print('Flash Attention installed:', flash_attn.__version__)" 2>/dev/null; then
+    echo "Flash Attention verification passed"
+else
+    echo "WARNING: Flash Attention NOT available — GPU utilization will be 0%"
+    echo "         Inference will fall back to SDPA (CPU-bound, 30+ second responses)"
 fi
 
 # huggingface_hub CLI is included in the base package (no [cli] extra needed)
